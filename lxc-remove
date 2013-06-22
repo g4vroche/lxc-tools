@@ -1,0 +1,79 @@
+#!/bin/bash
+
+# Configuration
+###############
+LXCFSBASE=/var/lib/lxc
+###############
+
+# Init only
+DIR=`pwd`
+HOST="$HOSTNAME.lxc"
+GUEST=
+IP=
+###############
+
+# Root check
+if [ "$(id -u)" != "0" ]; then
+  echo "You must be a root user" 2>&1
+  exit 1
+fi
+
+
+
+usage()
+{
+cat << EOF
+usage: $0 options
+
+This script packs an lxc container into an archive
+
+OPTIONS:
+   -h      Show this message
+   -n      container name
+   -v      Verbose
+EOF
+}
+
+
+while getopts “hn:v” OPTION
+do
+     case $OPTION in
+         h)
+             usage
+             exit 1
+             ;;
+         n)
+             GUEST=$OPTARG
+             LXCFS=$LXCFSBASE/$GUEST
+             ;;
+         v)
+             VERBOSE=1
+             ;;
+         ?)
+             usage
+             exit
+             ;;
+     esac
+done
+
+if [ -z $GUEST ]
+then
+     usage
+     exit 1
+fi
+
+
+IP=`egrep "address ([0-9.]+)" $LXCFS/rootfs/etc/network/interfaces |sed "s/address //"`
+
+
+egrep -v "^$IP $GUEST.$HOST" /etc/hosts > /etc/hosts.2
+mv /etc/hosts.2 /etc/hosts
+
+echo "Shuting down guest $GUEST"
+lxc-stop -n $GUEST
+
+
+
+echo "Deleting $GUEST"
+lxc-destroy -n $GUEST
+

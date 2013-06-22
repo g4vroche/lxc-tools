@@ -1,0 +1,75 @@
+#!/bin/sh
+
+# Configuration
+###############
+DIR=`pwd`
+LXCFSBASE=/var/lib/lxc
+
+###############
+
+
+# Root check
+if [ "$(id -u)" != "0" ]; then
+  echo "You must be a root user" 2>&1
+  exit 1
+fi
+
+
+
+usage()
+{
+cat << EOF
+usage: $0 options
+
+This script packs an lxc container into an archive
+
+OPTIONS:
+   -h      Show this message
+   -n      container name
+   -v      Verbose
+EOF
+}
+
+
+GUEST=
+LIGHT=
+while getopts “hn:v” OPTION
+do
+     case $OPTION in
+         h)
+             usage
+             exit 1
+             ;;
+         n)
+             GUEST=$OPTARG
+             LXCFS=$LXCFSBASE/$GUEST
+             ;;
+         v)
+             VERBOSE=1
+             ;;
+         ?)
+             usage
+             exit
+             ;;
+     esac
+done
+
+if [ -z $GUEST ]
+then
+     usage
+     exit 1
+fi
+
+
+echo "Shuting down guest $GUEST"
+lxc-stop -n $GUEST
+
+echo "Packing $GUEST"
+cd $LXCFS
+tar -cj . | pv > "$DIR/$GUEST.tar.bz2"
+
+echo "Done"
+cd $DIR
+
+#TODO : Check if guest was running
+lxc-start -n $GUEST -d

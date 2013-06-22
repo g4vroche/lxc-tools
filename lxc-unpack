@@ -1,0 +1,200 @@
+#!/bin/bash
+
+# Configuration
+###############
+LXCFSBASE=/var/lib/lxc
+LXCDEF=/etc/default/lxc
+LXCCONF=/etc/lxc/lxc.conf
+
+# Init only
+DIR=`pwd`
+HOST="$HOSTNAME.lxc"
+GUEST=
+FILENAME=
+IP=
+VERBOSE=0
+# Include lxc default config
+source $LXCDEF
+###############
+
+
+# Root check
+if [ "$(id -u)" != "0" ]; then
+  echo "You must be a root user" 2>&1
+  exit 1
+fi
+
+
+
+usage()
+{
+cat << EOF
+usage: $0 options
+
+This script unpacks an lxc container from an archive, install and start it
+
+OPTIONS:
+   -h       Show this message
+   -f       input file
+   [-n]     new container name
+   [-i]     ip address
+   -v       Verbose
+EOF
+}
+
+changeName(){
+  sed -i "s/$CONTAINER/$NAME/" $LXCFS/$1
+}
+
+findAddress(){
+    IPBASE=`echo $LXC_NETWORK|awk -F. '{print $1"."$2"."$3"."}'`
+
+    ASSIGNEDIPS=" "`grep -E ^$IPBASE\([0-9]*\)\  /etc/hosts -o`" -"
+
+
+    FROM=`echo $LXC_DHCP_RANGE | awk -F,  '{print $1}' |awk -F. '{print $4}'`
+    TO=`echo $LXC_DHCP_RANGE | awk -F,  '{print $2}' |awk -F. '{print $4}'`
+    i=$FROM
+
+    while [[ ($i -le $TO) && $IP = "" ]]
+    do
+        TEMP=`echo $ASSIGNEDIPS |grep $IPBASE$i\ `
+
+        if [ -z "$TEMP" ]
+        then
+            IP=$IPBASE$i
+        fi
+        
+        let i++
+    done
+}
+
+
+
+while getopts “hf:n:i:v” OPTION
+do
+     case $OPTION in
+         h)
+             usage
+             exit 1
+             ;;
+         f)
+             FILENAME=$OPTARG
+             ;;
+         n)
+             NAME=$OPTARG
+             LXCFS=$LXCFSBASE/$GUEST
+             ;;
+         i)
+            IP=$OPTARG
+            ;;
+         v)
+             VERBOSE=1
+             ;;
+         ?)
+             usage
+             exit
+             ;;
+     esac
+done
+
+# check source file (mandatory)
+if [ -z $FILENAME ]
+then
+     usage
+     exit 1
+fi
+
+FILE=`basename $FILENAME`
+CONTAINER=`echo $FILE| cut -d'.' -f1`
+
+if [ -z $NAME ]
+then
+    NAME=$CONTAINER
+fi
+
+# Find free IP address
+if [ -z $IP ]
+then
+    findAddress
+fi
+
+
+
+LXCFS=$LXCFSBASE/$NAME
+
+
+echo "Creating new container"
+echo "======================"
+echo "Source file:              $FILENAME"
+echo "Original container name:  $CONTAINER"
+echo "New container name:       $NAME"
+echo "IP address:               $IP"
+echo "File system:              $LXCFS/rootfs/"
+echo "Domain:                   $NAME.$HOST"
+echo ""
+echo "Proceed ? [Y/n]"
+
+read DO
+
+if [[ "$DO" = "n" || "$DO" = "N" ]]
+then
+    echo "Aborted"
+    exit;
+fi
+
+
+
+if [ $VERBOSE -eq 1 ]; then
+    echo "Creating new container..."
+fi
+
+lxc-create -n $NAME
+
+cd $LXCFS
+
+if [ $VERBOSE -eq 1 ]; then
+    echo "Unpacking from $FILENAME..."
+    pv "$DIR/$FILENAME"| tar -xj
+else
+    tar -xjf $DIR/$FILENAME
+fi
+
+
+
+if [ "$CONTAINER" != "$NAME" ]; then
+  if [ $VERBOSE -eq 1 ]; then
+      echo "Renaming from $CONTAINER to $NAME..."
+  fi
+
+  changeName config
+  changeName rootfs/etc/hosts
+  changeName rootfs/etc/hostname
+fi
+
+# Create new container config file
+cat $LXCCONF > $LXCFS/config.tmp; tail $LXCFS/config -n +4 >> $LXCFS/config.tmp
+mv $LXCFS/config.tmp config
+
+sed -i "s/address [0-9\.]*/address $IP/" $LXCFS/rootfs/etc/network/interfaces
+sed -i "s/gateway [0-9\.]*/gateway $LXC_ADDR/" $LXCFS/rootfs/etc/network/interfaces
+sed -i "s/netmask [0-9\.]*/netmask $LXC_NETMASK/" $LXCFS/rootfs/etc/network/interfaces
+
+
+
+HOSTLINE="$IP $NAME.$HOST www.$NAME.$HOST admin.$NAME.$HOST cdn.$NAME.$HOST"
+
+echo $HOSTLINE >> /etc/hosts
+
+
+if [ $VERBOSE -eq 1 ]; then
+    echo "Starting $NAME"
+fi
+
+lxc-start -n $NAME -d
+
+
+if [ $VERBOSE -eq 1 ]; then
+    echo "Done"
+fi
+
