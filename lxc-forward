@@ -1,0 +1,102 @@
+#!/usr/bin/env sh
+
+
+DEFAULT_INTERFACE="wlan0"
+DEFAULT_PORT="80"
+
+PORT=$DEFAULT_PORT
+INTERFACE=$DEFAULT_INTERFACE
+CONTAINER=""
+FORCE=0
+
+usage()
+{
+cat << EOF
+usage: $0 options
+
+This script shows a directory tree structure
+
+OPTIONS:
+   -h       Show this message
+   -c       container name
+   -i       interface (default to $DEFAULT_INTERFACE)
+   -p       port (default to $DEFAULT_PORT)
+EOF
+}
+
+
+
+while getopts “hc:p:i:f” OPTION
+do
+     case $OPTION in
+         h)
+            usage
+            exit
+            ;;
+         c)
+            CONTAINER=$OPTARG
+             ;;
+         p)
+           PORT=$OPTARG
+            ;;
+         i)
+           INTERFACE=$OPTARG
+           ;;
+         f)
+          FORCE=1
+          ;;
+     esac
+done
+
+if [ -z $CONTAINER ]
+then
+    echo "Specify a container name"
+    echo ""
+    usage
+    exit 2;
+fi
+
+IP=$(sudo lxc-ls --running --fancy |grep $CONTAINER |grep  -Eo '([0-9.]+)')
+
+
+if [ -z $IP ]
+then
+    echo "Container not found, make sure it exists and is runnning"
+    exit 2;
+fi
+
+CURRENT=$(sudo iptables --list FORWARD -n |grep -n dpt:$PORT)
+GO="n"
+
+if [ ! -z "$CURRENT" ]
+then
+
+    if [ $FORCE -eq 0 ]
+    then
+
+
+        echo "Warning ! an existing rule will be deleted :"
+        echo $CURRENT
+        echo "Confirm [Y/n]"
+        read GO
+
+        if [ ! -z $(echo $GO|grep -E '[nN]') ]
+        then
+            echo "Aborted"
+            exit 0;
+        else
+            FORCE=1
+        fi
+
+    fi
+    
+    LINE=$( echo $CURRENT | grep -Eo '[0-9]+:'|grep -Eo '[0-9]+')
+    
+    sudo iptables -D FORWARD $(($LINE-2)) 
+fi
+
+
+echo "Redirecting port $PORT on $INTERFACE to $IP"
+sudo iptables -t nat -A PREROUTING -p tcp -i $INTERFACE --dport $PORT -j DNAT --to-destination $IP:$PORT
+sudo iptables -A FORWARD -p tcp -d $IP --dport $PORT -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT
+echo "Done"
