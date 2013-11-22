@@ -100,3 +100,6 @@ echo "Redirecting port $PORT on $INTERFACE to $IP"
 sudo iptables -t nat -A PREROUTING -p tcp -i $INTERFACE --dport $PORT -j DNAT --to-destination $IP:$PORT
 sudo iptables -A FORWARD -p tcp -d $IP --dport $PORT -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT
 echo "Done"
+
+EXIP=$(sudo ifconfig wlan0 |grep -Eo "adr:([1-9.]+)"|grep -Eo "[0-9.]+")
+echo "$CONTAINER is now reachable through $EXIP"
